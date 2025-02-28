@@ -347,7 +347,7 @@ class VideoMetadataViewer(QMainWindow):
                     file_path
                 ]
 
-                result = subprocess.run(command, capture_output=True, text=True)
+                result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
                 try:
                     metadata = json.loads(result.stdout)
                     tags = metadata.get('format', {}).get('tags', {})
@@ -575,9 +575,6 @@ class VideoMetadataViewer(QMainWindow):
         if "🔊 AUDIO STREAMS" in current_text:
             lufs_analysis = self.audio_analyzer.get_lufs(self.current_file)
             if lufs_analysis:
-                # Define the consistent separator length
-                separator_length = 50
-                separator = "=" * separator_length
 
                 # Split text at audio streams
                 parts = current_text.split("🔊 AUDIO STREAMS")
