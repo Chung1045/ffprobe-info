@@ -23,7 +23,7 @@ class AudioAnalyzer:
                 '-'
             ]
             
-            result = subprocess.run(command, capture_output=True, text=True)
+            result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
             
             # Extract JSON data from ffmpeg output
             match = re.search(r'\{.*\}', result.stderr, re.DOTALL)
