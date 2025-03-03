@@ -4,15 +4,80 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFont, QPixmap, QFontDatabase
+from PyQt5.QtCore import Qt, pyqtSignal, QObject
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout,
                              QTextEdit, QWidget, QFileDialog, QLabel, QHBoxLayout,
-                             QMessageBox)
+                             QMessageBox, QDialog)
 
 from audio_analyzer import AudioAnalyzer
 from video_quality_analyzer import VideoQualityAnalyzer
+
+
+class LUFSWorker(QObject):
+    """Worker to perform LUFS analysis in background thread"""
+    finished = pyqtSignal(str)
+
+    def __init__(self, file_path, audio_analyzer):
+        super().__init__()
+        self.file_path = file_path
+        self.audio_analyzer = audio_analyzer
+
+    def run(self):
+        result = self.audio_analyzer.get_lufs(self.file_path)
+        self.finished.emit(result)
+
+
+class LUFSResultDialog(QDialog):
+    def __init__(self, lufs_analysis, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("LUFS Analysis Results")
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(self)
+        
+        # Create text display
+        text_display = QTextEdit()
+        text_display.setReadOnly(True)
+        text_display.setText(lufs_analysis)
+        text_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: monospace;
+            }
+        """)
+        layout.addWidget(text_display)
+        
+        # Add close button
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3b3b3b;
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+                color: #dcdcdc;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #4b4b4b;
+            }
+        """)
+        layout.addWidget(close_button, alignment=Qt.AlignCenter)
+        
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2b2b2b;
+                color: #dcdcdc;
+            }
+        """)
 
 
 class QCollapsibleBox(QWidget):
@@ -67,7 +132,7 @@ class DropLabel(QLabel):
                 border-color: #999;
             }
         """)
-        self.setFixedHeight(100)  # Smaller fixed height
+        self.setFixedHeight(100)
         self.setAcceptDrops(True)
 
     def dragEnterEvent(self, event):
@@ -95,16 +160,14 @@ class VideoMetadataViewer(QMainWindow):
 
         self.setWindowTitle("Media Metadata Viewer")
         self.setGeometry(100, 100, 1200, 800)
-        self.setAcceptDrops(True)  # Enable drops for main window
-        self.min_width_for_horizontal = 1000  # Minimum width for horizontal layout
+        self.setAcceptDrops(True)
+        self.min_width_for_horizontal = 1000
         self.setup_ui()
         self.current_thumbnail = None
         self.quality_analyzer = VideoQualityAnalyzer()
         self.audio_analyzer = AudioAnalyzer()
-        self.lufs_timer = QTimer()
-        self.lufs_timer.setSingleShot(True)
-        self.lufs_timer.timeout.connect(self.process_lufs_analysis)
         self.current_file = None  # To store current file path
+        self.lufs_progress = None  # For progress dialog
 
     def check_ffmpeg(self):
         """Check if ffmpeg and ffprobe are installed"""
@@ -173,7 +236,7 @@ class VideoMetadataViewer(QMainWindow):
             "• Drag and drop any media file anywhere on this window\n"
             "• Or click the 'Select Media File' button\n"
             "• Supports video (mp4, avi, mkv, etc.) and audio (mp3, wav, m4a, etc.)\n"
-            "• LUFS analysis will be performed automatically for audio streams"
+            "• Click the 'Analyze LUFS' button after loading a file to perform loudness analysis"
         )
         self.main_layout.addWidget(self.tips_label)
 
@@ -194,8 +257,8 @@ class VideoMetadataViewer(QMainWindow):
         thumbnail_layout.setAlignment(Qt.AlignHCenter)
 
         self.thumbnail_label = QLabel()
-        self.thumbnail_label.setMinimumSize(150, 150)  # Set minimum size
-        self.thumbnail_label.setMaximumSize(200, 200)  # Set maximum size
+        self.thumbnail_label.setMinimumSize(150, 150)
+        self.thumbnail_label.setMaximumSize(200, 200)
         self.thumbnail_label.setStyleSheet("""
             QLabel {
                 background-color: #1e1e1e;
@@ -207,8 +270,8 @@ class VideoMetadataViewer(QMainWindow):
         self.file_name_label = QLabel()
         self.file_name_label.setAlignment(Qt.AlignCenter)
         self.file_name_label.setWordWrap(True)
-        self.file_name_label.setMinimumWidth(150)  # Minimum width to match thumbnail
-        self.file_name_label.setMaximumWidth(200)  # Maximum width to match thumbnail
+        self.file_name_label.setMinimumWidth(150)
+        self.file_name_label.setMaximumWidth(200)
         self.file_name_label.setStyleSheet("""
             QLabel {
                 margin-bottom: 10px;
@@ -222,6 +285,14 @@ class VideoMetadataViewer(QMainWindow):
         thumbnail_layout.addWidget(self.file_name_label)
 
         self.right_layout.addWidget(self.thumbnail_widget)
+
+        # Buttons container widget
+        self.buttons_widget = QWidget()
+        self.buttons_widget.setFixedWidth(200)  # Match thumbnail width
+        self.buttons_layout = QVBoxLayout(self.buttons_widget)
+        self.buttons_layout.setAlignment(Qt.AlignHCenter)
+        self.buttons_layout.setSpacing(10)  # Add some space between buttons
+        self.buttons_layout.setContentsMargins(0, 0, 0, 0)
 
         # Select button
         self.select_button = QPushButton("Select Media File")
@@ -239,7 +310,42 @@ class VideoMetadataViewer(QMainWindow):
             }
         """)
         self.select_button.clicked.connect(self.select_file)
-        self.right_layout.addWidget(self.select_button, alignment=Qt.AlignHCenter)
+        self.buttons_layout.addWidget(self.select_button, 0, Qt.AlignHCenter)
+
+        self.lufs_button_container = QWidget()
+        self.lufs_button_container.setFixedWidth(150)
+        lufs_button_layout = QHBoxLayout(self.lufs_button_container)
+        lufs_button_layout.setContentsMargins(0, 0, 0, 0)
+        lufs_button_layout.setSpacing(5)
+        lufs_button_layout.setAlignment(Qt.AlignCenter)
+        
+        self.lufs_button = QPushButton("Analyze LUFS")
+        self.lufs_button.setFixedWidth(120)
+        self.lufs_button.setEnabled(False)  # Initially disabled
+        self.lufs_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3b3b3b;
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+                color: #dcdcdc;
+            }
+            QPushButton:hover {
+                background-color: #4b4b4b;
+            }
+            QPushButton:disabled {
+                background-color: #2b2b2b;
+                color: #666666;
+            }
+        """)
+        self.lufs_button.clicked.connect(self.process_lufs_analysis)
+        
+        lufs_button_layout.addWidget(self.lufs_button)
+        
+        self.buttons_layout.addWidget(self.lufs_button_container, 0, Qt.AlignHCenter)
+
+        # Add buttons container to right panel
+        self.right_layout.addWidget(self.buttons_widget)
 
         # Left panel for info
         self.left_panel = QWidget()
@@ -308,7 +414,7 @@ class VideoMetadataViewer(QMainWindow):
             if process.returncode != 0 or not os.path.exists(thumb_path) or os.path.getsize(thumb_path) == 0:
                 video_command = [
                     'ffmpeg', '-y', '-i', file_path,
-                    '-vframes', '1', '-vf', 'scale=-1:150',  # Scale to height 150px
+                    '-vframes', '1', '-vf', 'scale=-1:150',
                     thumb_path
                 ]
                 process = subprocess.run(video_command, capture_output=True, encoding='utf-8')
@@ -318,7 +424,6 @@ class VideoMetadataViewer(QMainWindow):
 
                 # Handle different aspect ratios
                 if self.get_file_type(self.get_metadata(file_path)) == 'audio':
-                    # For audio files, maintain square aspect for album art
                     size = min(200, max(150, min(pixmap.width(), pixmap.height())))
                     scaled_pixmap = pixmap.scaled(
                         size, size,
@@ -326,19 +431,14 @@ class VideoMetadataViewer(QMainWindow):
                         Qt.SmoothTransformation
                     )
                 else:
-                    # For video files, maintain original aspect ratio
                     if pixmap.width() > pixmap.height():
-                        # Landscape: scale to width 200px
                         scaled_pixmap = pixmap.scaledToWidth(200, Qt.SmoothTransformation)
                     else:
-                        # Portrait: scale to height 150px
                         scaled_pixmap = pixmap.scaledToHeight(150, Qt.SmoothTransformation)
 
                 self.thumbnail_label.setPixmap(scaled_pixmap)
-                # Update filename and title
                 filename = os.path.basename(file_path)
 
-                # Get metadata for title
                 command = [
                     'ffprobe',
                     '-v', 'quiet',
@@ -353,7 +453,6 @@ class VideoMetadataViewer(QMainWindow):
                     tags = metadata.get('format', {}).get('tags', {})
                     title = tags.get('title', '')
 
-                    # Handle long filenames
                     max_filename_length = 30
                     if len(filename) > max_filename_length:
                         displayed_filename = filename[:max_filename_length - 3] + "..."
@@ -361,16 +460,11 @@ class VideoMetadataViewer(QMainWindow):
                         displayed_filename = filename
 
                     if title and title != filename:
-                        # Handle long titles
-                        # if len(title) > max_filename_length:
-                        #     displayed_title = title[:max_filename_length-3] + "..."
-                        # else:
                         displayed_title = title
                         self.file_name_label.setText(f"{displayed_title}\n({displayed_filename})")
                     else:
                         self.file_name_label.setText(displayed_filename)
 
-                    # Set full name as tooltip
                     if title and title != filename:
                         self.file_name_label.setToolTip(f"{title}\n({filename})")
                     else:
@@ -382,7 +476,6 @@ class VideoMetadataViewer(QMainWindow):
                 self.thumbnail_label.setText("No thumbnail/album art")
                 self.file_name_label.setText(os.path.basename(file_path))
 
-            # Clean up
             if os.path.exists(thumb_path):
                 os.remove(thumb_path)
 
@@ -413,7 +506,6 @@ class VideoMetadataViewer(QMainWindow):
     def get_file_type(self, metadata):
         """Determine if the file is video or audio"""
         streams = metadata.get('streams', [])
-        # Add VP8/VP9 (WebM codecs) to video detection
         video_codecs = {'h264', 'hevc', 'vp8', 'vp9', 'av1'}
         has_video = any(s.get('codec_type') == 'video' and
                         s.get('codec_name', '').lower() in video_codecs
@@ -426,11 +518,9 @@ class VideoMetadataViewer(QMainWindow):
             streams = metadata.get('streams', [])
             file_type = self.get_file_type(metadata)
 
-            # Define a standard separator length
             separator_length = 50
             separator = "=" * separator_length + "\n"
 
-            # Basic file information
             formatted = "📁 FILE INFORMATION\n"
             formatted += separator
             formatted += f"Type: {'Video' if file_type == 'video' else 'Audio'} File\n"
@@ -440,7 +530,6 @@ class VideoMetadataViewer(QMainWindow):
             formatted += f"Size: {int(format_info.get('size', 0)) / (1024 * 1024):.2f} MB\n"
             formatted += f"Bitrate: {int(format_info.get('bit_rate', 0)) / 1000:.2f} kbps\n"
 
-            # Add tags if they exist (for audio files)
             tags = format_info.get('tags', {})
             if tags:
                 formatted += "\n📌 TAGS\n"
@@ -449,7 +538,6 @@ class VideoMetadataViewer(QMainWindow):
                     formatted += f"{key.title()}: {value}\n"
             formatted += "\n"
 
-            # Only show video streams for actual video files
             if file_type == 'video':
                 video_streams = [s for s in streams if s.get('codec_type') == 'video'
                                  and s.get('codec_name', '').lower() != 'mjpeg']
@@ -458,21 +546,19 @@ class VideoMetadataViewer(QMainWindow):
                     formatted += separator
                     for i, stream in enumerate(video_streams, 1):
                         formatted += f"Video Stream #{i}\n"
-                        codec_name = stream.get('codec_name', 'N/A').lower()  # Get and normalize codec name
-                        formatted += f"  Codec: {codec_name.upper()}\n"  # Display in uppercase
+                        codec_name = stream.get('codec_name', 'N/A').lower()
+                        formatted += f"  Codec: {codec_name.upper()}\n"
 
                         resolution = f"{stream.get('width', 'N/A')}x{stream.get('height', 'N/A')}"
                         formatted += f"  Resolution: {resolution}\n"
 
-                        framerate = stream.get('r_frame_rate', '30/1')  # Default to 30fps if not specified
+                        framerate = stream.get('r_frame_rate', '30/1')
                         formatted += f"  Framerate: {framerate}\n"
                         formatted += f"  Pixel Format: {stream.get('pix_fmt', 'N/A')}\n"
 
-                        # Get bitrate either from stream or calculate from format
                         if stream.get('bit_rate'):
                             bitrate_kbps = int(stream.get('bit_rate', 0)) / 1000
                         else:
-                            # Estimate video bitrate by subtracting audio bitrates from total
                             total_bitrate = int(format_info.get('bit_rate', 0)) / 1000
                             audio_bitrate = sum(int(s.get('bit_rate', 0)) / 1000
                                                 for s in streams
@@ -483,7 +569,6 @@ class VideoMetadataViewer(QMainWindow):
                             formatted += f"  Bitrate: {bitrate_kbps:.2f} kbps\n"
                         formatted += "\n"
 
-                        # Add quality analysis in a separate section
                         if bitrate_kbps > 0:
                             formatted += "  📊 QUALITY ANALYSIS\n"
                             formatted += "  " + "-" * 30 + "\n"
@@ -493,7 +578,6 @@ class VideoMetadataViewer(QMainWindow):
                                 formatted += f"  {quality_analysis}\n"
                             formatted += "\n"
 
-            # Audio streams
             audio_streams = [s for s in streams if s.get('codec_type') == 'audio']
             if audio_streams:
                 formatted += "🔊 AUDIO STREAMS\n"
@@ -507,7 +591,6 @@ class VideoMetadataViewer(QMainWindow):
                         formatted += f"  Bitrate: {int(stream.get('bit_rate', 0)) / 1000:.2f} kbps\n"
                     formatted += "\n"
 
-            # Subtitle streams
             subtitle_streams = [s for s in streams if s.get('codec_type') == 'subtitle']
             if subtitle_streams:
                 formatted += "💬 SUBTITLE STREAMS\n"
@@ -518,7 +601,6 @@ class VideoMetadataViewer(QMainWindow):
                     formatted += f"  Language: {stream.get('tags', {}).get('language', 'N/A')}\n"
                     formatted += "\n"
 
-            # Separate raw metadata
             raw_json = json.dumps(metadata, indent=2)
             self.raw_metadata_box.setText(raw_json)
 
@@ -552,57 +634,71 @@ class VideoMetadataViewer(QMainWindow):
             return f"Error: {str(e)}"
 
     def display_metadata(self, file_path):
-        # Store current file path
         self.current_file = file_path
 
-        # Display basic metadata first
         metadata = self.get_video_metadata(file_path)
         self.metadata_display.setText(metadata)
         self.metadata_display.verticalScrollBar().setValue(0)
         self.generate_thumbnail(file_path)
-
-        # Start LUFS analysis after a short delay (500ms)
-        self.lufs_timer.start(500)
+        self.lufs_button.setEnabled(True)  # Enable LUFS button when file is loaded
 
     def process_lufs_analysis(self):
+        """Start LUFS analysis in a background thread"""
         if not self.current_file:
             return
+        
+        # Disable LUFS button during analysis
+        self.lufs_button.setEnabled(False)
+        self.lufs_button.setText("Analyzing...")
 
-        # Get current text
+        # Create worker and thread
+        self.lufs_worker = LUFSWorker(self.current_file, self.audio_analyzer)
+        self.lufs_thread = threading.Thread(target=self.lufs_worker.run)
+
+        # Connect finished signal
+        self.lufs_worker.finished.connect(self.update_lufs_results)
+
+        # Start the analysis thread
+        self.lufs_thread.daemon = True
+        self.lufs_thread.start()
+
+    def update_lufs_results(self, lufs_analysis):
+        """Update UI with LUFS analysis results"""
+        
+        # Reset button state
+        self.lufs_button.setEnabled(True)
+        self.lufs_button.setText("Analyze LUFS")
+
+        # Show results in popup dialog
+        dialog = LUFSResultDialog(lufs_analysis, self)
+        dialog.exec_()
+
+        # Update the metadata display
         current_text = self.metadata_display.toPlainText()
 
-        # Find audio streams section and add LUFS analysis
         if "🔊 AUDIO STREAMS" in current_text:
-            lufs_analysis = self.audio_analyzer.get_lufs(self.current_file)
             if lufs_analysis:
-
-                # Split text at audio streams
                 parts = current_text.split("🔊 AUDIO STREAMS")
-                audio_section = parts[1].split("=", 1)[1]  # Get after the === line
+                audio_section = parts[1].split("=", 1)[1]
 
-                # Split audio section into streams
                 stream_parts = audio_section.split("Audio Stream #")
-
-                # Process each stream
                 processed_streams = ["Audio Stream #" + part if i > 0 else part
                                      for i, part in enumerate(stream_parts)]
 
-                # Add LUFS analysis to the first audio stream
                 if len(processed_streams) > 1:
                     stream_text = processed_streams[1]
-                    if not "LOUDNESS ANALYSIS" in stream_text:
+                    if "LOUDNESS ANALYSIS" not in stream_text:
                         analysis_text = "\n  " + "-" * 30 + "\n"
+                        analysis_text += "  📊 LOUDNESS ANALYSIS\n"
                         analysis_text += "  " + lufs_analysis.replace("\n", "\n  ") + "\n\n"
                         processed_streams[1] = stream_text.rstrip() + analysis_text
 
-                # Reconstruct the text
                 new_audio_section = "".join(processed_streams)
                 new_text = parts[0] + "🔊 AUDIO STREAMS\n" + new_audio_section
 
                 if len(parts) > 2:
                     new_text += "".join(parts[2:])
 
-                # Update the display
                 self.metadata_display.setText(new_text)
                 self.metadata_display.verticalScrollBar().setValue(0)
 
@@ -617,7 +713,6 @@ class VideoMetadataViewer(QMainWindow):
         if file_path:
             self.display_metadata(file_path)
 
-    # Add drag and drop support for the main window
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.accept()
