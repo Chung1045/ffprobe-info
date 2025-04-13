@@ -7,7 +7,7 @@ import tempfile
 import threading
 
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QFontDatabase, QFont
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout,
                              QTextEdit, QWidget, QFileDialog, QLabel, QHBoxLayout,
                              QMessageBox, QDialog)
@@ -36,21 +36,28 @@ class LUFSResultDialog(QDialog):
         self.setWindowTitle("LUFS Analysis Results")
         self.setMinimumWidth(400)
         
+        # Get the custom font family from parent
+        if parent and hasattr(parent, 'custom_font_family'):
+            self.custom_font_family = parent.custom_font_family
+        else:
+            self.custom_font_family = "monospace"
+        
         layout = QVBoxLayout(self)
         
         # Create text display
         text_display = QTextEdit()
         text_display.setReadOnly(True)
         text_display.setText(lufs_analysis)
-        text_display.setStyleSheet("""
-            QTextEdit {
+        text_display.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: #1e1e1e;
                 color: #dcdcdc;
                 border: none;
                 border-radius: 5px;
                 padding: 10px;
-                font-family: monospace;
-            }
+                font-family: '{self.custom_font_family}', monospace;
+                font-size: 12px;
+            }}
         """)
         layout.addWidget(text_display)
         
@@ -100,6 +107,17 @@ class QCollapsibleBox(QWidget):
 
         self.content = QTextEdit(self)
         self.content.setReadOnly(True)
+        self.content.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: monospace;
+                font-size: 12px;
+            }
+        """)
         self.content.hide()
 
         layout = QVBoxLayout(self)
@@ -162,12 +180,30 @@ class VideoMetadataViewer(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         self.setAcceptDrops(True)
         self.min_width_for_horizontal = 1000
+        
+        # Load custom font
+        self.load_custom_font()
+        
         self.setup_ui()
         self.current_thumbnail = None
         self.quality_analyzer = VideoQualityAnalyzer()
         self.audio_analyzer = AudioAnalyzer()
         self.current_file = None  # To store current file path
         self.lufs_progress = None  # For progress dialog
+        
+    def load_custom_font(self):
+        """Load the custom FiraCode font from file"""
+        # Get the directory where the script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        font_path = os.path.join(script_dir, "FiraCode-Regular.ttf")
+        
+        # Load the font
+        font_id = QFontDatabase.addApplicationFont(font_path)
+        if font_id != -1:
+            self.custom_font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
+        else:
+            print("Error: Could not load custom font. Using fallback fonts.")
+            self.custom_font_family = "monospace"
 
     def check_ffmpeg(self):
         """Check if ffmpeg and ffprobe are installed"""
@@ -211,6 +247,7 @@ class VideoMetadataViewer(QMainWindow):
                 border-radius: 5px;
                 padding: 10px;
                 font-size: 12px;
+                font-family: '{self.custom_font_family}', monospace;
             }}
         """)
 
@@ -354,10 +391,33 @@ class VideoMetadataViewer(QMainWindow):
         # Metadata display area
         self.metadata_display = QTextEdit()
         self.metadata_display.setReadOnly(True)
+        self.metadata_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: '{self.custom_font_family}', monospace;
+                font-size: 12px;
+            }}
+        """)
         self.left_layout.addWidget(self.metadata_display)
 
         # Collapsible raw metadata
         self.raw_metadata_box = QCollapsibleBox("🔧 Raw Metadata (Click to expand)")
+        # Set custom font for the content
+        self.raw_metadata_box.content.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: '{self.custom_font_family}', monospace;
+                font-size: 12px;
+            }}
+        """)
         self.left_layout.addWidget(self.raw_metadata_box)
 
         self.horizontal_layout.addWidget(self.left_panel)
