@@ -10,7 +10,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QPixmap, QFontDatabase, QFont
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout,
                              QTextEdit, QWidget, QFileDialog, QLabel, QHBoxLayout,
-                             QMessageBox, QDialog)
+                             QMessageBox, QDialog, QTabWidget)
 
 from audio_analyzer import AudioAnalyzer
 from video_quality_analyzer import VideoQualityAnalyzer
@@ -35,15 +35,15 @@ class LUFSResultDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("LUFS Analysis Results")
         self.setMinimumWidth(400)
-        
+
         # Get the custom font family from parent
         if parent and hasattr(parent, 'custom_font_family'):
             self.custom_font_family = parent.custom_font_family
         else:
             self.custom_font_family = "monospace"
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Create text display
         text_display = QTextEdit()
         text_display.setReadOnly(True)
@@ -60,7 +60,7 @@ class LUFSResultDialog(QDialog):
             }}
         """)
         layout.addWidget(text_display)
-        
+
         # Add close button
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
@@ -78,7 +78,7 @@ class LUFSResultDialog(QDialog):
             }
         """)
         layout.addWidget(close_button, alignment=Qt.AlignCenter)
-        
+
         self.setStyleSheet("""
             QDialog {
                 background-color: #2b2b2b;
@@ -180,23 +180,23 @@ class VideoMetadataViewer(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         self.setAcceptDrops(True)
         self.min_width_for_horizontal = 1000
-        
+
         # Load custom font
         self.load_custom_font()
-        
+
         self.setup_ui()
         self.current_thumbnail = None
         self.quality_analyzer = VideoQualityAnalyzer()
         self.audio_analyzer = AudioAnalyzer()
         self.current_file = None  # To store current file path
         self.lufs_progress = None  # For progress dialog
-        
+
     def load_custom_font(self):
         """Load the custom FiraCode font from file"""
         # Get the directory where the script is located
         script_dir = os.path.dirname(os.path.abspath(__file__))
         font_path = os.path.join(script_dir, "FiraCode-Regular.ttf")
-        
+
         # Load the font
         font_id = QFontDatabase.addApplicationFont(font_path)
         if font_id != -1:
@@ -355,7 +355,7 @@ class VideoMetadataViewer(QMainWindow):
         lufs_button_layout.setContentsMargins(0, 0, 0, 0)
         lufs_button_layout.setSpacing(5)
         lufs_button_layout.setAlignment(Qt.AlignCenter)
-        
+
         self.lufs_button = QPushButton("Analyze LUFS")
         self.lufs_button.setFixedWidth(120)
         self.lufs_button.setEnabled(False)  # Initially disabled
@@ -376,9 +376,9 @@ class VideoMetadataViewer(QMainWindow):
             }
         """)
         self.lufs_button.clicked.connect(self.process_lufs_analysis)
-        
+
         lufs_button_layout.addWidget(self.lufs_button)
-        
+
         self.buttons_layout.addWidget(self.lufs_button_container, 0, Qt.AlignHCenter)
 
         # Add buttons container to right panel
@@ -388,26 +388,38 @@ class VideoMetadataViewer(QMainWindow):
         self.left_panel = QWidget()
         self.left_layout = QVBoxLayout(self.left_panel)
 
-        # Metadata display area
-        self.metadata_display = QTextEdit()
-        self.metadata_display.setReadOnly(True)
-        self.metadata_display.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: #1e1e1e;
-                color: #dcdcdc;
+        # Create tab widget for metadata display
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
                 border: none;
+                background-color: #1e1e1e;
                 border-radius: 5px;
-                padding: 10px;
-                font-family: '{self.custom_font_family}', monospace;
-                font-size: 12px;
+            }}
+            QTabBar::tab {{
+                background-color: #2b2b2b;
+                color: #a0a0a0;
+                padding: 8px 12px;
+                margin-right: 2px;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: #1e1e1e;
+                color: #ffffff;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: #3b3b3b;
             }}
         """)
-        self.left_layout.addWidget(self.metadata_display)
 
-        # Collapsible raw metadata
-        self.raw_metadata_box = QCollapsibleBox("🔧 Raw Metadata (Click to expand)")
-        # Set custom font for the content
-        self.raw_metadata_box.content.setStyleSheet(f"""
+        # Create tabs for different metadata categories
+        # Overview tab
+        self.overview_tab = QWidget()
+        overview_layout = QVBoxLayout(self.overview_tab)
+        self.overview_display = QTextEdit()
+        self.overview_display.setReadOnly(True)
+        self.overview_display.setStyleSheet(f"""
             QTextEdit {{
                 background-color: #1e1e1e;
                 color: #dcdcdc;
@@ -418,7 +430,86 @@ class VideoMetadataViewer(QMainWindow):
                 font-size: 12px;
             }}
         """)
-        self.left_layout.addWidget(self.raw_metadata_box)
+        overview_layout.addWidget(self.overview_display)
+        self.tab_widget.addTab(self.overview_tab, "📁 Overview")
+
+        # Video tab
+        self.video_tab = QWidget()
+        video_layout = QVBoxLayout(self.video_tab)
+        self.video_display = QTextEdit()
+        self.video_display.setReadOnly(True)
+        self.video_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: '{self.custom_font_family}', monospace;
+                font-size: 12px;
+            }}
+        """)
+        video_layout.addWidget(self.video_display)
+        self.tab_widget.addTab(self.video_tab, "🎥 Video")
+
+        # Audio tab
+        self.audio_tab = QWidget()
+        audio_layout = QVBoxLayout(self.audio_tab)
+        self.audio_display = QTextEdit()
+        self.audio_display.setReadOnly(True)
+        self.audio_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: '{self.custom_font_family}', monospace;
+                font-size: 12px;
+            }}
+        """)
+        audio_layout.addWidget(self.audio_display)
+        self.tab_widget.addTab(self.audio_tab, "🔊 Audio")
+
+        # Subtitles tab
+        self.subtitles_tab = QWidget()
+        subtitles_layout = QVBoxLayout(self.subtitles_tab)
+        self.subtitles_display = QTextEdit()
+        self.subtitles_display.setReadOnly(True)
+        self.subtitles_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: '{self.custom_font_family}', monospace;
+                font-size: 12px;
+            }}
+        """)
+        subtitles_layout.addWidget(self.subtitles_display)
+        self.tab_widget.addTab(self.subtitles_tab, "💬 Subtitles")
+
+        # Raw metadata tab
+        self.raw_tab = QWidget()
+        raw_layout = QVBoxLayout(self.raw_tab)
+        self.raw_display = QTextEdit()
+        self.raw_display.setReadOnly(True)
+        self.raw_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #1e1e1e;
+                color: #dcdcdc;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-family: '{self.custom_font_family}', monospace;
+                font-size: 12px;
+            }}
+        """)
+        raw_layout.addWidget(self.raw_display)
+        self.tab_widget.addTab(self.raw_tab, "🔧 Raw Metadata")
+
+        self.left_layout.addWidget(self.tab_widget)
 
         self.horizontal_layout.addWidget(self.left_panel)
         self.horizontal_layout.addWidget(self.right_panel)
@@ -556,6 +647,7 @@ class VideoMetadataViewer(QMainWindow):
 
         result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
         if result.returncode == 0:
+            print(f"get_metadata: {result.stdout}")
             return json.loads(result.stdout)
         return {}
 
@@ -570,7 +662,128 @@ class VideoMetadataViewer(QMainWindow):
         has_video = any(s.get('codec_type') == 'video' and
                         s.get('codec_name', '').lower() in video_codecs
                         for s in streams)
+        print("Get file type")
+        print("File type is: ", 'video' if has_video else 'audio')
         return 'video' if has_video else 'audio'
+
+    def format_metadata_by_category(self, metadata):
+        """Format metadata into different categories for different tabs"""
+        try:
+            format_info = metadata.get('format', {})
+            streams = metadata.get('streams', [])
+            file_type = self.get_file_type(metadata)
+
+            separator_length = 50
+            separator = "=" * separator_length + "\n"
+
+            # Overview information
+            overview = "📁 FILE INFORMATION\n"
+            overview += separator
+            overview += f"Type: {'Video' if file_type == 'video' else 'Audio'} File\n"
+            overview += f"Filename: {format_info.get('filename', 'N/A')}\n"
+            overview += f"Format: {format_info.get('format_name', 'N/A')}\n"
+            overview += f"Duration: {float(format_info.get('duration', 0)):.2f} seconds\n"
+            overview += f"Size: {int(format_info.get('size', 0)) / (1024 * 1024):.2f} MB\n"
+            overview += f"Bitrate: {int(format_info.get('bit_rate', 0)) / 1000:.2f} kbps\n"
+
+            tags = format_info.get('tags', {})
+            if tags:
+                overview += "\n📌 TAGS\n"
+                overview += separator
+                for key, value in tags.items():
+                    overview += f"{key.title()}: {value}\n"
+            overview += "\n"
+
+            # Video streams information
+            video_info = ""
+            video_streams = [s for s in streams if s.get('codec_type') == 'video'
+                             and s.get('codec_name', '').lower() != 'mjpeg']
+            if video_streams:
+                video_info += "🎥 VIDEO STREAMS\n"
+                video_info += separator
+                for i, stream in enumerate(video_streams, 1):
+                    video_info += f"Video Stream #{i}\n"
+                    codec_name = stream.get('codec_name', 'N/A').lower()
+                    video_info += f"  Codec: {codec_name.upper()}\n"
+
+                    resolution = f"{stream.get('width', 'N/A')}x{stream.get('height', 'N/A')}"
+                    video_info += f"  Resolution: {resolution}\n"
+
+                    framerate = stream.get('r_frame_rate', '30/1')
+                    video_info += f"  Framerate: {framerate}\n"
+                    video_info += f"  Pixel Format: {stream.get('pix_fmt', 'N/A')}\n"
+
+                    if stream.get('bit_rate'):
+                        bitrate_kbps = int(stream.get('bit_rate', 0)) / 1000
+                    else:
+                        total_bitrate = int(format_info.get('bit_rate', 0)) / 1000
+                        audio_bitrate = sum(int(s.get('bit_rate', 0)) / 1000
+                                            for s in streams
+                                            if s.get('codec_type') == 'audio')
+                        bitrate_kbps = total_bitrate - audio_bitrate
+
+                    if bitrate_kbps > 0:
+                        video_info += f"  Bitrate: {bitrate_kbps:.2f} kbps\n"
+                    video_info += "\n"
+
+                    if bitrate_kbps > 0:
+                        video_info += "  📊 QUALITY ANALYSIS\n"
+                        video_info += "  " + "-" * 30 + "\n"
+                        quality_analysis = self.analyze_video_quality(resolution, bitrate_kbps, codec_name,
+                                                                      framerate)
+                        if quality_analysis:
+                            video_info += f"  {quality_analysis}\n"
+                        video_info += "\n"
+
+            # Audio streams information
+            audio_info = ""
+            audio_streams = [s for s in streams if s.get('codec_type') == 'audio']
+            if audio_streams:
+                audio_info += "🔊 AUDIO STREAMS\n"
+                audio_info += separator
+                for i, stream in enumerate(audio_streams, 1):
+                    audio_info += f"Audio Stream #{i}\n"
+                    audio_info += f"  Codec: {stream.get('codec_name', 'N/A')}\n"
+                    audio_info += f"  Channels: {stream.get('channels', 'N/A')}\n"
+                    audio_info += f"  Sample Rate: {stream.get('sample_rate', 'N/A')} Hz\n"
+                    if stream.get('bit_rate'):
+                        audio_info += f"  Bitrate: {int(stream.get('bit_rate', 0)) / 1000:.2f} kbps\n"
+                    audio_info += "\n"
+
+            # Subtitle streams information
+            subtitle_info = ""
+            subtitle_streams = [s for s in streams if s.get('codec_type') == 'subtitle']
+            if subtitle_streams:
+                subtitle_info += "💬 SUBTITLE STREAMS\n"
+                subtitle_info += separator
+                for i, stream in enumerate(subtitle_streams, 1):
+                    subtitle_info += f"Subtitle Stream #{i}\n"
+                    subtitle_info += f"  Codec: {stream.get('codec_name', 'N/A')}\n"
+                    subtitle_info += f"  Language: {stream.get('tags', {}).get('language', 'N/A')}\n"
+                    subtitle_info += "\n"
+            else:
+                subtitle_info = "No subtitle streams found."
+
+            # Raw metadata
+            raw_json = json.dumps(metadata, indent=2)
+
+            return {
+                'overview': overview,
+                'video': video_info if video_info else "No video streams found.",
+                'audio': audio_info if audio_info else "No audio streams found.",
+                'subtitles': subtitle_info,
+                'raw': raw_json
+            }
+
+        except Exception as e:
+            error_msg = f"Error formatting metadata: {str(e)}"
+            return {
+                'overview': error_msg,
+                'video': error_msg,
+                'audio': error_msg,
+                'subtitles': error_msg,
+                'raw': error_msg
+            }
 
     def format_metadata(self, metadata):
         try:
@@ -661,9 +874,6 @@ class VideoMetadataViewer(QMainWindow):
                     formatted += f"  Language: {stream.get('tags', {}).get('language', 'N/A')}\n"
                     formatted += "\n"
 
-            raw_json = json.dumps(metadata, indent=2)
-            self.raw_metadata_box.setText(raw_json)
-
             return formatted
         except Exception as e:
             return f"Error formatting metadata: {str(e)}"
@@ -688,25 +898,85 @@ class VideoMetadataViewer(QMainWindow):
                 return f"Error: Unable to read metadata from {file_path}"
 
             metadata = json.loads(result.stdout)
+            print("Video Metadata:", metadata)
             return self.format_metadata(metadata)
 
         except Exception as e:
             return f"Error: {str(e)}"
 
     def display_metadata(self, file_path):
+        """Display metadata in the tabbed interface"""
         self.current_file = file_path
 
-        metadata = self.get_video_metadata(file_path)
-        self.metadata_display.setText(metadata)
-        self.metadata_display.verticalScrollBar().setValue(0)
+        # Get metadata
+        if not self.check_ffmpeg():
+            error_msg = "Error: FFmpeg/FFprobe not found. Please install FFmpeg."
+            self.overview_display.setText(error_msg)
+            self.video_display.setText(error_msg)
+            self.audio_display.setText(error_msg)
+            self.subtitles_display.setText(error_msg)
+            self.raw_display.setText(error_msg)
+            return
+
+        try:
+            command = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_format',
+                '-show_streams',
+                file_path
+            ]
+
+            result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
+
+            if result.returncode != 0:
+                error_msg = f"Error: Unable to read metadata from {file_path}"
+                self.overview_display.setText(error_msg)
+                self.video_display.setText(error_msg)
+                self.audio_display.setText(error_msg)
+                self.subtitles_display.setText(error_msg)
+                self.raw_display.setText(error_msg)
+                return
+
+            metadata = json.loads(result.stdout)
+
+            # Format metadata for different tabs
+            formatted_data = self.format_metadata_by_category(metadata)
+
+            # Update each tab with formatted data
+            self.overview_display.setText(formatted_data['overview'])
+            self.video_display.setText(formatted_data['video'])
+            self.audio_display.setText(formatted_data['audio'])
+            self.subtitles_display.setText(formatted_data['subtitles'])
+            self.raw_display.setText(formatted_data['raw'])
+
+            # Reset scroll position for all tabs
+            self.overview_display.verticalScrollBar().setValue(0)
+            self.video_display.verticalScrollBar().setValue(0)
+            self.audio_display.verticalScrollBar().setValue(0)
+            self.subtitles_display.verticalScrollBar().setValue(0)
+            self.raw_display.verticalScrollBar().setValue(0)
+
+        except Exception as e:
+            error_msg = f"Error: {str(e)}"
+            self.overview_display.setText(error_msg)
+            self.video_display.setText(error_msg)
+            self.audio_display.setText(error_msg)
+            self.subtitles_display.setText(error_msg)
+            self.raw_display.setText(error_msg)
+
+        # Generate thumbnail
         self.generate_thumbnail(file_path)
-        self.lufs_button.setEnabled(True)  # Enable LUFS button when file is loaded
+
+        # Enable LUFS button when file is loaded
+        self.lufs_button.setEnabled(True)
 
     def process_lufs_analysis(self):
         """Start LUFS analysis in a background thread"""
         if not self.current_file:
             return
-        
+
         # Disable LUFS button during analysis
         self.lufs_button.setEnabled(False)
         self.lufs_button.setText("Analyzing...")
@@ -724,7 +994,7 @@ class VideoMetadataViewer(QMainWindow):
 
     def update_lufs_results(self, lufs_analysis):
         """Update UI with LUFS analysis results"""
-        
+
         # Reset button state
         self.lufs_button.setEnabled(True)
         self.lufs_button.setText("Analyze LUFS")
@@ -733,34 +1003,44 @@ class VideoMetadataViewer(QMainWindow):
         dialog = LUFSResultDialog(lufs_analysis, self)
         dialog.exec_()
 
-        # Update the metadata display
-        current_text = self.metadata_display.toPlainText()
+        # Update the audio tab with LUFS analysis
+        current_text = self.audio_display.toPlainText()
 
-        if "🔊 AUDIO STREAMS" in current_text:
-            if lufs_analysis:
-                parts = current_text.split("🔊 AUDIO STREAMS")
-                audio_section = parts[1].split("=", 1)[1]
+        if "🔊 AUDIO STREAMS" in current_text and lufs_analysis:
+            parts = current_text.split("Audio Stream #")
+            if len(parts) > 1:
+                # Add LUFS analysis to the first audio stream
+                stream_text = parts[1]
+                if "LOUDNESS ANALYSIS" not in stream_text:
+                    # Find the end of the first stream info
+                    lines = stream_text.split('\n')
+                    insert_index = 0
+                    for i, line in enumerate(lines):
+                        if line.strip() == "" and i > 0:  # First empty line after stream info
+                            insert_index = i
+                            break
 
-                stream_parts = audio_section.split("Audio Stream #")
-                processed_streams = ["Audio Stream #" + part if i > 0 else part
-                                     for i, part in enumerate(stream_parts)]
+                    if insert_index == 0:
+                        insert_index = len(lines)
 
-                if len(processed_streams) > 1:
-                    stream_text = processed_streams[1]
-                    if "LOUDNESS ANALYSIS" not in stream_text:
-                        analysis_text = "\n  " + "-" * 30 + "\n"
-                        analysis_text += "  📊 LOUDNESS ANALYSIS\n"
-                        analysis_text += "  " + lufs_analysis.replace("\n", "\n  ") + "\n\n"
-                        processed_streams[1] = stream_text.rstrip() + analysis_text
+                    # Insert LUFS analysis
+                    analysis_lines = [
+                        "",
+                        "  📊 LOUDNESS ANALYSIS",
+                        "  " + "-" * 30
+                    ]
+                    for line in lufs_analysis.split('\n'):
+                        if line.strip():
+                            analysis_lines.append(f"  {line}")
+                    analysis_lines.append("")
 
-                new_audio_section = "".join(processed_streams)
-                new_text = parts[0] + "🔊 AUDIO STREAMS\n" + new_audio_section
+                    # Insert the analysis
+                    lines[insert_index:insert_index] = analysis_lines
+                    parts[1] = '\n'.join(lines)
 
-                if len(parts) > 2:
-                    new_text += "".join(parts[2:])
-
-                self.metadata_display.setText(new_text)
-                self.metadata_display.verticalScrollBar().setValue(0)
+                    new_text = "Audio Stream #".join(parts)
+                    self.audio_display.setText(new_text)
+                    self.audio_display.verticalScrollBar().setValue(0)
 
     def select_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -768,9 +1048,11 @@ class VideoMetadataViewer(QMainWindow):
             "Select Media File",
             "",
             "Media Files (*.mp4 *.avi *.mkv *.mov *.wmv *.webm *.gif *.webp"
-            " *.mp3 *.wav *.flac *.m4a *.aac);;All Files (*.*)"
+            " *.mp3 *.wav *.flac *.m4a *.aac *hevc *heic *png *jpg);;All Files (*.*)"
         )
         if file_path:
+            print("The media file path is: " + file_path)
+            # Fix: Call display_metadata instead of just setting the label
             self.display_metadata(file_path)
 
     def dragEnterEvent(self, event):
